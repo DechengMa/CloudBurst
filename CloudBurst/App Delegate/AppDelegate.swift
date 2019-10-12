@@ -19,7 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             fatalError("Unexpected Root View Controller")
         }
         
-        let rootViewModel = RootViewModel()
+        let rootViewModel = RootViewModel(networkService: NetworkManager(), locationService: LocationManager())
         
         rootViewController.viewModel = rootViewModel
          

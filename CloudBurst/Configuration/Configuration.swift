@@ -7,12 +7,21 @@
 //
 
 import Foundation
-import CoreLocation
 
 enum Default {
     
-    static let location = CLLocation(latitude: -37.8922746, longitude: 145.0428544) 
+    static let location = Location(latitude: -37.8922746, longitude: 145.0428544)
     
+}
+
+enum Configuration {
+    static var refreshThreshold: TimeInterval {
+        #if DEBUG
+        return 60.0
+        #else
+        return 10.0 * 60.0
+        #endif
+    }
 }
 
 enum WeatherService {

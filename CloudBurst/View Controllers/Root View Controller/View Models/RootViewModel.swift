@@ -7,25 +7,61 @@
 //
 
 import Foundation
+import UIKit
 
-class RootViewModel {
+class RootViewModel: NSObject {
     
     enum WeatherDataError: Error {
+        case notAuthorizedToRequestLocation
+        case failedToRequestLocation
         case noWeatherDataAvailable
     }
     
-    typealias DidFetchWeatherDataCompletion = ((WeatherData?, WeatherDataError?) -> Void)
-    
-    var didFetchWeatherData: DidFetchWeatherDataCompletion?
-    
-    init() {
-        fetchWeatherData()
+    enum WeatherDataResult {
+        case success(WeatherData)
+        case failure(WeatherDataError)
     }
     
-    private func fetchWeatherData() {
-        let weatherRequest = WeatherRequest(baseUrl: WeatherService.authenticatedBaseUrl, location: Default.location)
+    typealias FetchWeatherDataCompletion = ((WeatherDataResult) -> Void)
+    
+    var didFetchWeatherData: FetchWeatherDataCompletion?
+    
+    private let networkService: NetworkService
+    private let locationService: LocationService
+    
+    init(networkService: NetworkService, locationService: LocationService) {
         
-        URLSession.shared.dataTask(with: weatherRequest.url) { [weak self] (data, response, error) in
+        self.networkService = networkService
+        self.locationService = locationService
+        
+        super.init()
+        
+        setupNotificationHandling()
+    }
+    
+    // Mark: - Helper
+    
+    private func fetchLocation() {
+        locationService.fetchLocation { [weak self] (result) in
+            switch result {
+            case .success(let location):
+                // Invoke Completion Handler
+                self?.fetchWeatherData(for: location)
+            case .failure(let error):
+                print("Unable to Fetch Location \(error)")
+                
+                let result: WeatherDataResult = .failure(.notAuthorizedToRequestLocation)
+                
+                // Invoke Completion Handler
+                self?.didFetchWeatherData?(result)
+            }
+        }
+    }
+    
+    private func fetchWeatherData(for location: Location) {
+        let weatherRequest = WeatherRequest(baseUrl: WeatherService.authenticatedBaseUrl, location: location)
+        
+        networkService.fetchData(with: weatherRequest.url) { [weak self] (data, response, error) in
             if let response = response as? HTTPURLResponse {
                 print("Status Code: \(response.statusCode)")
             }
@@ -34,7 +70,9 @@ class RootViewModel {
                 if let error = error {
                     print("Unable to fetch weather data \(error)")
                     
-                    self?.didFetchWeatherData?(nil, .noWeatherDataAvailable)
+                    let result: WeatherDataResult = .failure(.noWeatherDataAvailable)
+                    
+                    self?.didFetchWeatherData?(result)
                 } else if let data = data {
                     let decoder = JSONDecoder()
                     
@@ -43,17 +81,58 @@ class RootViewModel {
                     do {
                         let darkSkyResponse = try decoder.decode(DarkSkyResponse.self, from: data)
                         
-                        self?.didFetchWeatherData?(darkSkyResponse, nil)
+                        let result: WeatherDataResult = .success(darkSkyResponse)
+                        
+                        UserDefaults.didFetchWeatherData = Date()
+                        
+                        self?.didFetchWeatherData?(result)
                     } catch {
                         print("Unable to Decode JSON Response \(error)")
                         
-                        self?.didFetchWeatherData?(nil, .noWeatherDataAvailable)
+                        let result: WeatherDataResult = .failure(.noWeatherDataAvailable)
+                        
+                        self?.didFetchWeatherData?(result)
                     }
                 } else {
-                    self?.didFetchWeatherData?(nil, nil)
+                    let result: WeatherDataResult = .failure(.noWeatherDataAvailable)
+                    
+                    self?.didFetchWeatherData?(result)
                 }
             }
-        }.resume()
+            }
     }
     
+    private func setupNotificationHandling() {
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                               object: nil,
+                                               queue: .main) { [weak self] (_) in
+                                                guard let didFetchWeatherData = UserDefaults.didFetchWeatherData else {
+                                                    self?.refresh()
+                                                    return
+                                                }
+                                                
+                                                if Date().timeIntervalSince(didFetchWeatherData) > Configuration.refreshThreshold {
+                                                    self?.refresh()
+                                                }
+        }
+    }
+    
+    func refresh() {
+        fetchLocation()
+    }
+}
+
+extension UserDefaults {
+    private enum Keys {
+        static let didFetchWeatherData = "didFetchWeatherData"
+    }
+    
+    fileprivate class var didFetchWeatherData: Date? {
+        get {
+            return UserDefaults.standard.object(forKey: Keys.didFetchWeatherData) as? Date
+        }
+        set(newValue) {
+            UserDefaults.standard.set(newValue, forKey: Keys.didFetchWeatherData)
+        }
+    }
 }

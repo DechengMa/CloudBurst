@@ -11,6 +11,8 @@ import UIKit
 final class RootViewController: UIViewController {
     
     private enum AlertType {
+        case notAuthorizedToRequestLocation
+        case failedToRequestLocation
         case noWeatherDataAvailable
     }
     
@@ -36,12 +38,13 @@ final class RootViewController: UIViewController {
         return dayViewController
     }()
     
-    private let weekViewController: WeekViewController = {
+    private lazy var weekViewController: WeekViewController = {
         guard let weekViewController = UIStoryboard.main.instantiateViewController(withIdentifier: WeekViewController.storyboardIdentifier) as? WeekViewController else {
             fatalError("Unable to Instantiate Week View Controller")
         }
         
         // Configure Week View Controller
+        weekViewController.delegate = self
         weekViewController.view.translatesAutoresizingMaskIntoConstraints = false
         
         return weekViewController
@@ -54,6 +57,8 @@ final class RootViewController: UIViewController {
         
         // Setup Child View Controllers
         setupChildViewControllers()
+        
+        viewModel?.refresh()
     }
 
     // Mark: - Helper Methods
@@ -85,18 +90,31 @@ final class RootViewController: UIViewController {
     }
     
     private func setupViewModel(with viewModel: RootViewModel) {
-        viewModel.didFetchWeatherData = { [weak self] (weatherData, error) in
-            if let _ = error {
-               self?.presentAlert(of: .noWeatherDataAvailable)
-            } else if let weatherData = weatherData {
+        viewModel.didFetchWeatherData = { [weak self] result in
+            switch result {
+            case .success(let weatherData):
                 let dayViewModel = DayViewModel(weatherData: weatherData.current)
                 self?.dayViewController.viewModel = dayViewModel
                 
                 let weekViewModel = WeekViewModel(weatherData: weatherData.forecast)
                 
                 self?.weekViewController.viewModel = weekViewModel
-            } else {
+            case .failure(let error):
+                let alertType: AlertType
+                
+                switch error {
+                case .notAuthorizedToRequestLocation:
+                    alertType = .notAuthorizedToRequestLocation
+                case .failedToRequestLocation:
+                    alertType = .failedToRequestLocation
+                case .noWeatherDataAvailable:
+                    alertType = .noWeatherDataAvailable
+                }
+                
                 self?.presentAlert(of: .noWeatherDataAvailable)
+                
+                self?.dayViewController.viewModel = nil
+                self?.weekViewController.viewModel = nil
             }
         }
     }
@@ -106,6 +124,12 @@ final class RootViewController: UIViewController {
         let message: String
         
         switch alertType {
+        case .notAuthorizedToRequestLocation:
+            title = "Unable to Fetch Weather Data"
+            message = "Not authorized to accees your location"
+        case .failedToRequestLocation:
+            title = "Unable to Fetch Weather Data for Your Location"
+            message = "Error"
         case .noWeatherDataAvailable:
             title = "Unable to Fetch Weather Data"
             message = "The app is unable to fetch weather data"
@@ -122,3 +146,10 @@ final class RootViewController: UIViewController {
     }
 }
 
+extension RootViewController: WeekViewControllerDelegate {
+    
+    func controllerDidRefresh(_ controller: WeekViewController) {
+        viewModel?.refresh()
+    }
+    
+}
